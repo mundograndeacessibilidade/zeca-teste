@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<!-- zoom liberado: pessoas com baixa visão precisam poder ampliar -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zeca Teste</title>
+<style>
+  :root {
+    --panel: #dedede;      /* cinza claro do painel fixo */
+    --shadow: rgba(0,0,0,0.45);
+    --ink: #000000;
+    --btn: #262626;        /* botões: cinza muito escuro */
+    --btn-press: #3d3d3d;
+    --btn-text: #ffffff;
+    --bg-app: #1c1c1c;
+    --gap: 10px;           /* espaço entre botões */
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg-app); }
+
+  .app-wrapper {
+    display: flex; flex-direction: column;
+    height: 100vh; height: 100dvh;
+    max-width: 600px; margin: 0 auto;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  /* Com zoom alto (ou tela muito baixa) o painel fixo ocuparia a tela toda
+     e cortaria conteúdo. Nesses casos a página inteira passa a rolar.
+     (limite maior que antes, porque o painel ficou mais alto) */
+  @media (max-height: 620px) {
+    .app-wrapper { height: auto; min-height: 100dvh; overflow: visible; }
+    .playlist-scroll { overflow: visible; }
+  }
+
+  button { font-family: inherit; -webkit-tap-highlight-color: transparent; }
+  button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
+
+  /* ===== EFEITO DE CLIQUE + SOMBRA DURA ===== */
+  .top-panel button {
+    --btn-shadow: 4px 5px 0 var(--shadow);
+    box-shadow: var(--btn-shadow);
+    transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease;
+  }
+  .top-panel button:active {
+    transform: translate(3px, 4px) scale(0.97);
+    box-shadow: 1px 1px 0 var(--shadow);
+  }
+
+  /* ===== PAINEL FIXO CINZA ===== */
+  .top-panel {
+    flex: 0 0 auto;
+    background: var(--panel);
+    color: var(--ink);
+    border-radius: 0 0 22px 22px;
+    padding: calc(12px + env(safe-area-inset-top)) 10px 26px;
+  }
+
+  .exhibition-title {
+    margin: 0 0 12px;
+    font-size: 1em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  /* ===== BLOCO DE PLAY (largura total) =====
+     colunas laterais iguais => o play fica exatamente no centro
+     | capa   |      | tempo + status |
+     | capa   | PLAY |                |
+     | capa   |      | título         |              */
+  .center-btn {
+    width: 100%;
+    border: none;
+    background: var(--btn);
+    color: var(--btn-text);
+    border-radius: 22px;
+    padding: 14px;
+    cursor: pointer;
+    display: grid;
+    /* três colunas iguais: capa = 1/3 da esquerda,
+       título embaixo ocupando os 2/3 da direita */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+      "cover play  info"
+      "cover title title";
+    column-gap: 10px;
+    row-gap: 8px;
+    min-width: 0;
+  }
+  .center-btn:active { background: var(--btn-press); }
+
+  .cover-wrap {
+    grid-area: cover;
+    align-self: center;
+    justify-self: start;
+    position: relative;
+    width: 100%;
+    max-width: 192px;      /* dobro do anterior (96px) */
+  }
+  .cover-wrap.hidden { visibility: hidden; }
+  /* tarja de áudio de teste, por cima da capa */
+  .test-tag {
+    position: absolute; left: 8px; right: 8px; top: 8px;
+    background: #ff6a39; color: #000000;
+    font-weight: 800; font-size: 0.8em; letter-spacing: 0.04em;
+    text-align: center; padding: 4px 6px; border-radius: 8px;
+  }
+  .test-tag[hidden] { display: none; }
+  .cover-thumb {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 14px;
+    object-fit: cover;
+    background: #444;
+  }
+
+  .play-circle {
+    grid-area: play;
+    align-self: center;
+    justify-self: center;
+    /* fica na linha de cima => um pouco acima do meio do botão */
+    width: 76px; height: 76px; border-radius: 50%;
+    background: #fff; color: #000;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .play-circle .pill-icon {
+    font-size: 2.35em; line-height: 1;
+    margin-left: 6px;
+  }
+  .center-btn.is-playing .play-circle .pill-icon { margin-left: 0; font-size: 1.85em; }
+
+  /* quadrante superior direito: tempo + status */
+  .info {
+    grid-area: info;
+    align-self: start;
+    justify-self: center;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 4px;
+    min-width: 0;
+    white-space: nowrap;
+    text-align: center;
+    padding-top: 4px;
+  }
+  .time-in-block {
+    display: flex; flex-direction: column; align-items: center;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+  }
+  .t-cur { font-weight: 700; font-size: clamp(1.3em, 5.4vw, 1.6em); }
+  .t-dur { font-size: clamp(0.95em, 4vw, 1.15em); }
+  .status-text { font-weight: 700; font-size: clamp(1em, 4.2vw, 1.2em); }
+  .status-text.paused,
+  .status-text.error   { color: #ff6b5e; }  /* ~5,4:1 sobre #262626 */
+  .status-text.playing { color: #2ecc71; }  /* ~8:1 sobre #262626 */
+  .status-text.loading { color: #ffffff; }
+
+  /* parte inferior: título ocupando os 2/3 da direita.
+     Até 2 linhas, com altura reservada => o bloco não muda de tamanho */
+  .track-title {
+    grid-area: title;
+    align-self: end;
+    height: 2.4em;
+    display: flex; align-items: center; justify-content: flex-start;
+    font-weight: 700;
+    font-size: clamp(1.15em, 5vw, 1.4em);
+    line-height: 1.2;
+    min-width: 0;
+    padding-left: 12px;    /* respiro entre a capa e o início do título */
+  }
+  .track-title-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  /* ===== ANTERIOR / PRÓXIMA (metade cada) ===== */
+  .nav-row { display: flex; gap: var(--gap); margin-top: 18px; }
+  .side-btn {
+    flex: 1;
+    border: none;
+    border-radius: 14px;
+    background: var(--btn);
+    color: var(--btn-text);
+    font-size: 2em;
+    line-height: 1;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    padding: 14px 6px;
+  }
+  .side-btn:active { background: var(--btn-press); }
+
+  /* ===== VOLTAR 15s / VELOCIDADE / AVANÇAR 15s ===== */
+  .skip-row { display: flex; gap: var(--gap); margin-top: 18px; }
+  .btn-skip {
+    flex: 1;
+    border: none; border-radius: 14px;
+    background: var(--btn); color: var(--btn-text);
+    font-weight: 700; font-size: 1.3rem;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 19px 6px;
+    cursor: pointer;
+  }
+  .btn-skip:active { background: var(--btn-press); }
+  .btn-skip .icon { font-size: 1.3em; line-height: 1; }
+
+  /* ===== LISTA ROLÁVEL ===== */
+  .playlist-scroll {
+    position: relative;  /* referência para rolar até a faixa ativa */
+    flex: 1 1 auto; overflow-y: auto;
+    padding: 20px 12px calc(16px + env(safe-area-inset-bottom));
+    -webkit-overflow-scrolling: touch;
+  }
+  .playlist { list-style: none; margin: 0; padding: 0; }
+  .playlist li { margin-bottom: 8px; }
+
+  .track-item {
+    width: 100%;
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 12px;
+    border: 3px solid transparent; border-radius: 14px;
+    background: transparent; color: #fff;
+    text-align: left; cursor: pointer;
+    transition: transform 0.08s ease;
+  }
+  .track-item:active { transform: scale(0.97); }
+  .track-item:focus-visible { outline: 4px solid #fff; outline-offset: 2px; }
+  .track-item-num {
+    font-weight: 700; font-size: 1.5em;
+    min-width: 44px; height: 44px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+  }
+  /* nome em até 2 linhas, com altura de 2 linhas sempre reservada:
+     todos os itens da lista têm a mesma altura, com nome curto ou longo */
+  .track-item-title {
+    font-size: 1.5em; line-height: 1.2;
+    height: 2.4em;
+    min-width: 0; flex: 1;
+    display: flex; align-items: center;
+  }
+  .track-item-title-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .track-item[aria-current="true"] { border-color: #fff; background: rgba(255,255,255,0.12); }
+  .track-item[aria-current="true"] .track-item-num { background: #fff; color: #000; }
+  .track-item[aria-current="true"] .track-item-title { font-weight: 700; }
+
+  /* quem pede menos movimento no sistema não recebe as animações */
+  @media (prefers-reduced-motion: reduce) {
+    .top-panel button, .track-item { transition: none; }
+    .top-panel button:active, .track-item:active { transform: none; }
+  }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+</style>
+</head>
+<body>
+
+<main class="app-wrapper">
+
+  <div class="top-panel" role="region" aria-label="Player de áudio">
+    <h1 class="exhibition-title" id="expoTitle">Zeca Teste</h1>
+
+    <!-- bloco de play: um botão só, largura total. Conteúdo interno escondido
+         do leitor de tela; o nome acessível vem do aria-label. -->
+    <button type="button" class="center-btn" id="playBtn" aria-label="Reproduzir">
+      <span class="cover-wrap" id="coverWrap" aria-hidden="true">
+        <img class="cover-thumb" id="coverImage" src="" alt="" decoding="async">
+        <span class="test-tag" id="testTag" hidden>ÁUDIO DE TESTE</span>
+      </span>
+      <span class="play-circle" aria-hidden="true"><span class="pill-icon" id="playIcon">&#x25B6;&#xFE0E;</span></span>
+      <span class="info" aria-hidden="true">
+        <span class="time-in-block" id="timeVisual"></span>
+        <span class="status-text paused" id="statusText">Pausado</span>
+      </span>
+      <span class="track-title" aria-hidden="true"><span class="track-title-text" id="trackLabel">—</span></span>
+    </button>
+
+    <!-- tempo para leitor de tela (o visual está dentro do bloco) -->
+    <span class="sr-only" id="timeSr">Tempo: 00:00 de 00:00</span>
+
+    <!-- &#xFE0E; força o símbolo em modo texto (sem virar emoji colorido no iPhone) -->
+    <div class="nav-row">
+      <button type="button" class="side-btn" id="prevBtn" aria-label="Faixa anterior"><span aria-hidden="true">&#x23EE;&#xFE0E;</span></button>
+      <button type="button" class="side-btn" id="nextBtn" aria-label="Próxima faixa"><span aria-hidden="true">&#x23ED;&#xFE0E;</span></button>
+    </div>
+
+    <div class="skip-row">
+      <button type="button" class="btn-skip" id="rewindBtn" aria-label="Voltar 15 segundos">
+        <span class="icon" aria-hidden="true">«</span>15s
+      </button>
+      <button type="button" class="btn-skip" id="speedBtn">1x</button>
+      <button type="button" class="btn-skip" id="forwardBtn" aria-label="Avançar 15 segundos">
+        15s<span class="icon" aria-hidden="true">»</span>
+      </button>
+    </div>
+  </div>
+
+  <nav class="playlist-scroll" id="playlistScroll" aria-labelledby="playlistHeading">
+    <h2 class="sr-only" id="playlistHeading">Lista de faixas</h2>
+    <ol class="playlist" id="playlist"></ol>
+  </nav>
+
+  <!-- avisos para leitor de tela (troca de faixa, velocidade, erros) -->
+  <div class="sr-only" id="announcer" aria-live="polite"></div>
+</main>
+
+<script>
+const playlist = [
+  { title: "Uiler", audioUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/audios/faixa-01.mp3", coverUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/capas/faixa-01.webp" },
+  { title: "Sapão", audioUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/audios/faixa-02.mp3", coverUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/capas/faixa-02.webp" },
+  { title: "FroidIA", audioUrl: "https://mundograndeacessibilidade.github.io/frans/audios/faixa-03.mp3", coverUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/capas/faixa-03.webp" },
+  { title: "Paulino", audioUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/audios/faixa-04.mp3", coverUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/capas/faixa-04.webp" },
+  { title: "Tarsila do Amaral", audioUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/audios/faixa-05.mp3", coverUrl: "https://mundograndeacessibilidade.github.io/zeca-teste/capas/faixa-05.webp" }
+];
+
+/* Ao terminar uma faixa, passa sozinho para a próxima?
+   true  = sim (comportamento original)
+   false = para no fim e deixa a próxima faixa carregada, pausada */
+const AUTO_AVANCAR = true;
+
+const SPEEDS = [1, 1.5, 2, 0.75];
+let speedIndex = 0;
+let currentTrack = 0;
+let playing = false;
+
+const audio = new Audio();
+audio.preload = 'metadata';
+
+const $ = (id) => document.getElementById(id);
+const playBtn    = $('playBtn');
+const playIcon   = $('playIcon');
+const statusText = $('statusText');
+const trackLabel = $('trackLabel');
+const cover      = $('coverImage');
+const testTag    = $('testTag');
+/* nome falado da faixa: avisa quando o áudio ainda é de teste */
+const spoken = (t) => t.title + (t.test ? ', áudio de teste' : '');
+const coverWrap  = $('coverWrap');
+const timeVisual = $('timeVisual');
+const timeSr     = $('timeSr');
+const announcer  = $('announcer');
+const playlistEl = $('playlist');
+const scrollBox  = $('playlistScroll');
+const speedBtn   = $('speedBtn');
+const rewindBtn  = $('rewindBtn');
+const forwardBtn = $('forwardBtn');
+const prevBtn    = $('prevBtn');
+const nextBtn    = $('nextBtn');
+const EXPO_TITLE = $('expoTitle').textContent.trim();
+
+function pad(n) { return String(Math.floor(n)).padStart(2, '0'); }
+function formatTime(s) {
+  if (!isFinite(s) || s < 0) s = 0;
+  return `${pad(s / 60)}:${pad(s % 60)}`;
+}
+
+/* Limpa e regrava o texto: assim a mesma mensagem é lida de novo se repetir */
+let announceTimer;
+function announce(msg) {
+  clearTimeout(announceTimer);
+  announcer.textContent = '';
+  announceTimer = setTimeout(() => { announcer.textContent = msg; }, 120);
+}
+
+function updateTime() {
+  const cur = formatTime(audio.currentTime);
+  const dur = formatTime(audio.duration);
+  timeVisual.innerHTML = `<span class="t-cur">${cur}</span><span class="t-dur">de ${dur}</span>`;
+  timeSr.textContent = `Tempo: ${cur} de ${dur}`;
+}
+
+const STATUS = {
+  paused:  'Pausado',
+  playing: 'Tocando',
+  loading: 'Carregando…',
+  error:   'Erro'
+};
+function setStatus(kind) {
+  statusText.textContent = STATUS[kind];
+  statusText.className = `status-text ${kind}`;
+}
+
+function updatePlayButtonName() {
+  const t = playlist[currentTrack];
+  const action = playing ? 'Pausar' : 'Reproduzir';
+  playBtn.setAttribute('aria-label', `${action}: faixa ${currentTrack + 1} de ${playlist.length}, ${spoken(t)}`);
+}
+
+function setPlaying(isPlaying) {
+  playing = isPlaying;
+  playBtn.classList.toggle('is-playing', isPlaying);
+  // o círculo mostra a AÇÃO disponível; o status mostra o ESTADO atual
+  playIcon.textContent = isPlaying ? '❚❚' : '\u25B6\uFE0E';
+  setStatus(isPlaying ? 'playing' : 'paused');
+  updatePlayButtonName();
+}
+
+/* Rola só a lista (não a página do Wix) até a faixa ativa ficar visível */
+function revealTrack(index) {
+  const item = playlistEl.children[index];
+  if (!item) return;
+  const top = item.offsetTop;
+  const bottom = top + item.offsetHeight;
+  if (top < scrollBox.scrollTop) scrollBox.scrollTop = top - 12;
+  else if (bottom > scrollBox.scrollTop + scrollBox.clientHeight) {
+    scrollBox.scrollTop = bottom - scrollBox.clientHeight + 12;
+  }
+}
+
+function highlightTrack(index) {
+  playlistEl.querySelectorAll('.track-item').forEach((btn, i) => {
+    if (i === index) btn.setAttribute('aria-current', 'true');
+    else btn.removeAttribute('aria-current');
+  });
+  revealTrack(index);
+}
+
+function updateMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const t = playlist[currentTrack];
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: t.title,
+      artist: EXPO_TITLE,
+      artwork: t.coverUrl ? [{ src: t.coverUrl, sizes: '512x512' }] : []
+    });
+  } catch (e) {}
+}
+
+function loadTrack(index, { autoplay = true, announce: doAnnounce = true } = {}) {
+  currentTrack = index;
+  const t = playlist[index];
+  if (t.audioUrl) audio.src = t.audioUrl;
+  else { audio.removeAttribute('src'); audio.load(); }
+  audio.playbackRate = SPEEDS[speedIndex];
+
+  if (t.coverUrl) {
+    cover.src = t.coverUrl;
+    coverWrap.classList.remove('hidden');
+  } else {
+    cover.removeAttribute('src');
+    coverWrap.classList.add('hidden');
+  }
+  trackLabel.textContent = t.title;
+  testTag.hidden = !t.test;
+
+  highlightTrack(index);
+  setPlaying(false);
+  updateTime();
+  updateMediaSession();
+
+  if (doAnnounce) announce(`Faixa ${index + 1} de ${playlist.length}: ${spoken(t)}`);
+  if (autoplay) audio.play().catch(() => {});
+}
+
+function setSpeed(index, { speak = false } = {}) {
+  speedIndex = ((index % SPEEDS.length) + SPEEDS.length) % SPEEDS.length;
+  const rate = SPEEDS[speedIndex];
+  audio.playbackRate = rate;
+  const label = `${rate}x`.replace('.', ',');
+  speedBtn.textContent = label;
+  // o nome acessível contém o texto visível (importante para controle por voz)
+  speedBtn.setAttribute('aria-label', `Velocidade ${label}`);
+  if (speak) announce(rate === 1 ? 'Velocidade normal' : `Velocidade ${label.replace('x', ' vezes')}`);
+}
+
+function createPlaylist() {
+  playlist.forEach((t, i) => {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'track-item';
+    btn.setAttribute('aria-label', `Faixa ${i + 1}: ${spoken(t)}`);
+    btn.innerHTML = `
+      <span class="track-item-num" aria-hidden="true">${i + 1}</span>
+      <span class="track-item-title" aria-hidden="true"><span class="track-item-title-text"></span></span>`;
+    btn.querySelector('.track-item-title-text').textContent = t.title + (t.test ? ' · TESTE' : '');
+    btn.addEventListener('click', () => loadTrack(i));
+    li.appendChild(btn);
+    playlistEl.appendChild(li);
+  });
+}
+
+/* Aceita ?faixa=3, #faixa=3 ou ?track=3 (numeração começando em 1) */
+function getTrackFromURL() {
+  const q = new URLSearchParams(location.search);
+  const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const raw = q.get('faixa') ?? h.get('faixa') ?? q.get('track');
+  const n = parseInt(raw, 10);
+  return (!isNaN(n) && n >= 1 && n <= playlist.length) ? n - 1 : 0;
+}
+
+/* Recebe a faixa da página do Wix (o iframe não enxerga a URL da página).
+   Aceita { faixaIndex: 2 } (começa em 0) ou { faixa: 3 } (começa em 1). */
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || typeof d !== 'object') return;
+  let i = null;
+  if (Number.isInteger(d.faixaIndex)) i = d.faixaIndex;
+  else if (Number.isInteger(d.faixa)) i = d.faixa - 1;
+  else if (typeof d.faixa === 'string' && /^\d+$/.test(d.faixa)) i = parseInt(d.faixa, 10) - 1;
+  if (i !== null && i >= 0 && i < playlist.length && i !== currentTrack) {
+    // sem autoplay: o navegador bloquearia e seria uma surpresa para o visitante
+    loadTrack(i, { autoplay: false, announce: false });
+  }
+});
+
+playBtn.addEventListener('click', () => {
+  if (audio.paused) audio.play().catch(() => {});
+  else audio.pause();
+});
+
+function seekBy(seconds) {
+  const dur = isFinite(audio.duration) ? audio.duration : Infinity;
+  audio.currentTime = Math.min(Math.max(0, audio.currentTime + seconds), Math.max(0, dur - 0.25));
+}
+rewindBtn.addEventListener('click', () => seekBy(-15));
+forwardBtn.addEventListener('click', () => seekBy(15));
+speedBtn.addEventListener('click', () => setSpeed(speedIndex + 1, { speak: true }));
+
+function prevTrack() { loadTrack((currentTrack - 1 + playlist.length) % playlist.length); }
+function nextTrack() { loadTrack((currentTrack + 1) % playlist.length); }
+prevBtn.addEventListener('click', prevTrack);
+nextBtn.addEventListener('click', nextTrack);
+
+audio.addEventListener('play',  () => setPlaying(true));
+audio.addEventListener('pause', () => setPlaying(false));
+audio.addEventListener('waiting', () => { if (playing) setStatus('loading'); });
+audio.addEventListener('playing', () => setStatus('playing'));
+audio.addEventListener('loadedmetadata', updateTime);
+audio.addEventListener('timeupdate', updateTime);
+audio.addEventListener('error', () => {
+  if (!audio.getAttribute('src') && !audio.src) return;
+  setPlaying(false);
+  setStatus('error');
+  announce('Não foi possível carregar o áudio. Verifique a conexão e tente novamente.');
+});
+audio.addEventListener('ended', () => {
+  const isLast = currentTrack === playlist.length - 1;
+  if (isLast) {
+    // fim da exposição: não volta sozinho para a faixa 1
+    setPlaying(false);
+    announce('Fim da última faixa.');
+  } else {
+    loadTrack(currentTrack + 1, { autoplay: AUTO_AVANCAR });
+  }
+});
+
+/* Controles da tela bloqueada e dos botões do fone de ouvido */
+if ('mediaSession' in navigator) {
+  const handlers = {
+    play: () => audio.play().catch(() => {}),
+    pause: () => audio.pause(),
+    previoustrack: prevTrack,
+    nexttrack: nextTrack,
+    seekbackward: () => seekBy(-15),
+    seekforward: () => seekBy(15)
+  };
+  for (const [action, fn] of Object.entries(handlers)) {
+    try { navigator.mediaSession.setActionHandler(action, fn); } catch (e) {}
+  }
+}
+
+createPlaylist();
+setSpeed(speedIndex);
+loadTrack(getTrackFromURL(), { autoplay: false, announce: false });
+
+/* Avisa a página do Wix que o player está pronto para receber a faixa */
+if (window.parent !== window) {
+  try { window.parent.postMessage({ type: 'player-pronto' }, '*'); } catch (e) {}
+}
+</script>
+</body>
+</html>
